@@ -57,7 +57,7 @@ UUID=$( grep "UUID" /etc/pistar-release | awk '{print $3}' )
 OS_VER=$( cat /etc/debian_version | sed 's/\..*//')
 SUPPORTING_FILES_REPO="https://wpsd-swd.w0chp.net/WPSD-SWD/WPSD-Helpers/raw/branch/master/supporting-files"
 CONN_CHECK_URI="https://github.com/wiblingen/b-side"
-hostFileURL="https://barrandovhblink.jednoduse.cz/databaze"
+hostFileURL="http://barrandovhblink.jednoduse.cz/databaze"
 gitBranch=$(git --work-tree=/var/www/dashboard --git-dir=/var/www/dashboard/.git symbolic-ref --short HEAD)
 dashVer=$( git --work-tree=/var/www/dashboard --git-dir=/var/www/dashboard/.git rev-parse --short=10 ${gitBranch} )
 uuidStr=$(egrep 'UUID|ModemType|ModemMode|ControllerType' /etc/pistar-release | awk {'print $3'} | tac | xargs| sed 's/ /_/g')
