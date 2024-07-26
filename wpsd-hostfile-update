@@ -195,6 +195,7 @@ else
 fi
 
 # Grab DMR IDs
+curl --fail -L -o  ${hostFileURL}/DMRIds2.dat --user-agent "WPSD-HostFileUpdater ${uaStr}"
 curl --fail -L -o /tmp/DMRIds.tmp.bz2 -s ${hostFileURL}/DMRIds.dat.bz2 --user-agent "WPSD-HostFileUpdater ${uaStr}"
 bunzip2 -f /tmp/DMRIds.tmp.bz2
 # filter out IDs less than 7 digits (causing collisions with TGs of < 7 digits in "Target" column"
