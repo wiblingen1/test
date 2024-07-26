@@ -1,0 +1,36 @@
+#!/bin/bash
+#
+#############################################################################
+#                                                                           #
+#                          WPSD MMDVMCal Wrapper                            #
+#                                                                           #
+#############################################################################
+#
+
+if [ "$(id -u)" != "0" ]; then
+  echo -e "You need to be root to run this command...\n"
+  exit 1
+fi
+
+mmdvmModem=$(grep -m 1 'UARTPort=' /etc/mmdvmhost | awk -F "=" '/Port/ {print $2}')
+modemSpeed=$(grep -m 1 'UARTSpeed=' /etc/mmdvmhost | awk -F "=" '/UARTSpeed/ {print $2}')
+
+systemctl stop pistar-watchdog.timer
+systemctl stop pistar-watchdog.service
+systemctl stop mmdvmhost.timer
+systemctl stop mmdvmhost.service
+sleep 1
+killall MMDVMHost
+killall MMDVMHost_NoOLED
+killall MMDVMHost_Adafruit
+
+echo "Starting Calibration..."
+
+/usr/local/bin/MMDVMCal ${modemSpeed} ${mmdvmModem}
+
+systemctl start pistar-watchdog.timer
+systemctl start pistar-watchdog
+systemctl start mmdvmhost.timer
+systemctl start mmdvmhost
+
+echo "Complete..."

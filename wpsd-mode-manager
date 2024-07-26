@@ -1,0 +1,136 @@
+#!/bin/bash
+#
+###############################################################################
+#                                                                             #
+#  WPSD Mode Manager - used by Dash IMM. Can be called from cron and cli      #
+#                                                                             #
+###############################################################################
+#
+# Specify some Variables
+#
+MMDVMCONFIG="/etc/mmdvmhost"
+SYSCTL_MMDVMHOST="mmdvmhost"
+
+#
+# Check to make sure we are root, and bail out if we are not
+#
+if [ "$(id -u)" != "0" ]; then
+  echo -e "You need to be root to run this command...\n"
+  exit 1
+fi
+
+source /usr/local/sbin/.wpsd-common-funcs
+
+#
+# Output some useful information when no variables are passed
+#
+if [ -z "$1" ]; then
+  THIS_SCRIPT=$(basename "$0")
+  echo "This script needs arguments; the first should be the"
+  echo "mode you want to Disable/Enable, and the second"
+  echo "should be the 'action', either Enable or Disable."
+  echo ""
+  echo "Eg: \`${THIS_SCRIPT} D-Star Enable\`    -    Enable D-Star mode, and restart appropriate daemon"
+  echo "Eg: \`${THIS_SCRIPT} D-Star Disable\`   -    Disable D-Star mode, and restart appropriate daemon"
+  echo ""
+  echo "Valid module names are: D-Star, DMR, YSF, P25, NXDN, M17, AX25 & POCSAG"
+  echo ""
+  exit 0
+fi
+
+#
+# Check the first Argument
+#
+if [ "$1" ]; then
+  case ${1} in
+  ([Dd]-[Ss][Tt][Aa][Rr])
+    CUR_STATUS=$(awk -F'=' '/\[D-Star\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="D-Star"
+  ;;
+  ([Dd][Mm][Rr])
+    CUR_STATUS=$(awk -F'=' '/\[DMR\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="DMR"
+  ;;
+  ([Yy][Ss][Ff])
+    CUR_STATUS=$(awk -F'=' '/\[System Fusion\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="System Fusion"
+  ;;
+  ([Nn][Xx][Dd][Nn])
+    CUR_STATUS=$(awk -F'=' '/\[NXDN\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="NXDN"
+  ;;
+  ([Mm][1][7])
+    CUR_STATUS=$(awk -F'=' '/\[M17\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="M17"
+  ;;
+  ([Pp]25)
+    CUR_STATUS=$(awk -F'=' '/\[P25\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="P25"
+  ;;
+  ([Aa][Xx][2][5])
+    CUR_STATUS=$(awk -F'=' '/\[AX.25\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="AX25"
+  ;;
+  ([Pp][Oo][Cc][Ss][Aa][Gg])
+    CUR_STATUS=$(awk -F'=' '/\[POCSAG\]/{flag=1; next} flag && /Enable/{gsub(/[[:space:]]/, "", $2); print $2; flag=0}' ${MMDVMCONFIG})
+    MODULE="POCSAG"
+  ;;
+  *)
+    # Catch All
+    echo "Unknown Mode ${1}"
+    exit 1
+  ;;
+  esac
+fi
+
+#
+# Check the second Argument
+#
+if [ "$2" ]; then
+  case ${2} in
+  (Enable)
+    NEW_STATUS="1"
+    STATUS_TEXT="Enabled"
+  ;;
+  (Disable)
+    NEW_STATUS="0"
+    STATUS_TEXT="Disabled"
+  ;;
+  *)
+    # Catch All
+    echo "Unknown option ${2}"
+    exit 1
+  ;;
+  esac
+else
+  echo "Did you want ${MODULE} to be Enabled or Disabled?"
+  exit 1
+fi
+
+if [ "${CUR_STATUS}" == "${NEW_STATUS}" ]; then
+  # Nothing to do
+  echo "${MODULE} is already set to ${STATUS_TEXT}, nothing to do."
+  exit 0
+else
+  # Change required, so lets change it...
+  echo "Setting ${MODULE} to ${STATUS_TEXT} and reloading..."
+  systemctl stop cron.service > /dev/null 2>/dev/null &
+  sed -i "/^\[${MODULE}\]$/,/^$/ s/Enable=[[:digit:]]/Enable=${NEW_STATUS}/" ${MMDVMCONFIG}
+  if [ "${2}" == "Enable" ] && [ -f "/etc/${1}_paused" ]; then
+    rm -rf /etc/${1}_paused
+  fi
+  if [ "${2}" == "Disable" ] && [ ! -f "/etc/${1}_paused" ]; then
+    process_log_file
+    touch /etc/${1}_paused
+  fi
+  # dvmega cast-specific stuff
+  castResult=$(isDVmegaCast)
+  if [ "$castResult" == "true" ]; then
+    sudo /usr/local/cast/bin/cast-reset
+    sleep 2
+  fi
+  systemctl restart ${SYSCTL_MMDVMHOST} > /dev/null 2>&1 &
+  sync && sync && sync
+  systemctl start cron.service > /dev/null 2>/dev/null &
+fi
+

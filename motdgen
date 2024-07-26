@@ -1,0 +1,39 @@
+#!/bin/bash
+#
+##############################################################
+#                                                            #
+#                    WPSD MOTD Generator                     #
+#                                                            #
+##############################################################
+#
+
+# Make sure we are root
+if [ "$(id -u)" != "0" ]; then
+  echo -e "You need to be root to run this command...\n"
+  exit 1
+fi
+
+export FORCE_COLOR=1 # used for below bash:
+source /usr/local/sbin/.wpsd-common-funcs
+
+# Wait for an IP address
+counter=0
+max_attempts=60
+while ! interface_has_ip; do
+    sleep 1
+    ((counter++))
+    
+    if [ $counter -eq $max_attempts ]; then
+        exit 1 # no IP...leave the MOTD alone and bail
+    fi
+done
+
+echo -e "$( /usr/local/sbin/wpsd-version )
+${COL_NC}
+${QUES} Your WPSD dashboard can be accesed from:
+    ${BULL} ${COL_LIGHT_MAGENTA}http://$(hostname).local/${COL_NC}
+    ${BULL} ${COL_LIGHT_MAGENTA}http://$(hostname)/${COL_NC}
+    ${BULL} ${COL_LIGHT_MAGENTA}http://$(hostname -I | awk '{print $1}')/${COL_NC}
+
+${INFO} WPSD command-line tools are all prefixed with \"wpsd-\".
+" > /etc/motd

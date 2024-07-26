@@ -1,0 +1,197 @@
+#!/bin/bash
+
+### Cache HW and other pertinent information for a file used across the software & session storage
+
+# release/config init:
+INI_FILE="/etc/pistar-release"
+PlatDet="/usr/local/sbin/.wpsd-platform-detect"
+# Function to perform the mappings
+map_hardware() {
+    output=$(eval "$PlatDet") 
+    if echo "$output" | grep -q "NanoPi"; then
+        echo "NanoPi"
+    elif echo "$output" | grep -q "Raspberry"; then
+        echo "RaspberryPi"
+    elif echo "$output" | grep -q "Odroid"; then
+        echo "Odroid"
+    elif echo "$output" | grep -q "sun8i-based Pi Clone"; then
+        echo "RPiClone"
+    elif echo "$output" | grep -q "Samsung Artik"; then
+        echo "Samsung-Artik"
+    elif echo "$output" | grep -q "Orange Pi"; then
+        echo "OrangePi"
+    else
+        echo "$output"  # Return the original value if no mapping is found
+    fi
+}
+
+# Function to check if any of the specified keys are empty
+check_empty_keys() {
+    local empty_keys=0
+
+    if [ -f "$INI_FILE" ]; then
+        for key in ircddbgateway MMDVMHost kernel Hardware Platform iface ModemMode ModemType ControllerType ProcNum UUID ConfUpdReqd CallLookupProvider Callsign WPSD_Ver; do
+            if ! grep -qE "^${key} = .+" "$INI_FILE"; then
+                empty_keys=1
+                break
+            fi
+        done
+    fi
+
+    echo "$empty_keys"
+}
+
+# Function to check if the specified keys exist in the INI file
+check_key_existence() {
+    local missing_keys=0
+
+    if [ -f "$INI_FILE" ]; then
+        for key in ircddbgateway MMDVMHost kernel Hardware Platform iface ModemMode ModemType ControllerType ProcNum UUID ConfUpdReqd CallLookupProvider Callsign WPSD_Ver; do
+            if ! grep -qE "^${key} =" "$INI_FILE"; then
+                missing_keys=1
+                break
+            fi
+        done
+    else
+        missing_keys=1
+    fi
+
+    echo "$missing_keys"
+}
+
+if [ ! -f "$INI_FILE" ] || [ "$(check_key_existence)" -eq 1 ] || [ "$(check_empty_keys)" -eq 1 ]; then
+    cat > "$INI_FILE" <<EOF
+[Pi-Star]
+ircddbgateway = 
+MMDVMHost = 
+kernel = 
+Hardware = $(map_hardware "$(eval "$PlatDet")")
+Platform = 
+iface = 
+ModemMode = 
+ModemType = 
+ControllerType = 
+ProcNum = 
+UUID = 
+ConfUpdReqd = 2023010400
+CallLookupProvider = QRZ
+Callsign = 
+WPSD_Ver = 
+EOF
+fi
+
+# update HW key:
+HW_var=$(map_hardware "$(eval "$PlatDet")")
+sed -i "/Hardware/c Hardware = ${HW_var}" "$INI_FILE"
+
+# bins are sometimes built in a batch...use MMDVMHost ver as Dstar bin git/date vers...
+getVer=$( MMDVMHost -v | cut -d' ' -f 3- )
+sed -i "/^ircddbgateway.*/c ircddbgateway = ${getVer}" /etc/pistar-release
+sed -i "/MMDVMHost/c MMDVMHost = ${getVer}" /etc/pistar-release
+
+countProcs=$(grep -c ^processor /proc/cpuinfo)
+if ! grep -w 'ProcNum' /etc/pistar-release > /dev/null; then
+    sed -i "/Hardware = /a ProcNum = ${countProcs}" /etc/pistar-release
+else
+    sed -i "/ProcNum/c ProcNum = ${countProcs}" /etc/pistar-release
+fi
+
+activeIface=$(route | head -3 | tail -1 | awk '{print $8}')
+if ! grep -w 'iface' /etc/pistar-release > /dev/null; then
+    sed -i "/Hardware = /a iface = ${activeIface}" /etc/pistar-release
+else
+    sed -i "/iface/c iface = ${activeIface}" /etc/pistar-release
+fi
+
+KernelVer=`uname -r`
+sed -i "/kernel/c kernel = ${KernelVer}" /etc/pistar-release
+
+if ! grep -w 'Platform' /etc/pistar-release > /dev/null; then
+    sed -i "/Hardware = /a Platform = $(eval "$PlatDet")" /etc/pistar-release
+else
+    sed -i "/Platform/c Platform = $(eval "$PlatDet")" /etc/pistar-release
+fi
+
+GU=$( cat /proc/cpuinfo | grep Serial | cut -d ' ' -f 2 )
+sed -i "/UUID =/c\\UUID = ${GU}" /etc/pistar-release
+
+# migrate callsign info to last line of /etc/pistar-release
+CALL=$( awk -F"'" '/\$callsign=/ {print $2}' /var/www/dashboard/config/ircddblocal.php )
+if ! grep -w 'Callsign' /etc/pistar-release > /dev/null; then
+    echo "Callsign = ${CALL}" >> /etc/pistar-release
+else
+    sed -i "/Callsign =/c Callsign = ${CALL}" /etc/pistar-release
+fi
+callsign_count=$(grep -c "Callsign =" /etc/pistar-release)
+if [ "$callsign_count" -gt 1 ]; then
+  sed -i '/^Callsign =/d' /etc/pistar-release
+  echo "Callsign = ${CALL}" >> /etc/pistar-release
+fi
+
+# Cache Modem Mode
+if grep -q 'Duplex=1' /etc/mmdvmhost ; then
+    ModemMode="Duplex"
+else
+    ModemMode="Simplex"
+fi
+if ! grep -w 'ModemMode' /etc/pistar-release > /dev/null; then
+    sed -i "/iface = /a ModemMode = ${ModemMode}" /etc/pistar-release
+else
+    sed -i "/ModemMode =/c ModemMode = ${ModemMode}" /etc/pistar-release
+fi
+
+# Cache modem and controller types
+if [ -f '/etc/dstar-radio.mmdvmhost' ]; then
+    ControllerType="MMDVM"
+    ModemType=$( grep Hardware /etc/dstar-radio.mmdvmhost | sed 's/Hardware=//' )
+    if ! grep -w 'ModemType' /etc/pistar-release > /dev/null; then
+	sed -i "/ModemMode = /a ModemType = ${ModemType}" /etc/pistar-release
+    else
+	sed -i "/ModemType =/c ModemType = ${ModemType}" /etc/pistar-release
+    fi
+    if ! grep -w 'ControllerType' /etc/pistar-release > /dev/null; then
+        sed -i "/ModemType /a ControllerType = ${ControllerType}" /etc/pistar-release
+    else
+        sed -i "/ControllerType =/c ControllerType = ${ControllerType}" /etc/pistar-release
+    fi
+fi
+if [ -f '/etc/dstar-radio.dstarrepeater' ]; then
+    ControllerType="DSTARrepeater"
+    ModemType=$( grep Hardware /etc/dstar-radio.mmdvmhost | sed 's/Hardware=//' )
+    if ! grep -w 'ModemType' /etc/pistar-release > /dev/null; then
+	sed -i "/ModemMode = /a ModemType = ${ModemType}" /etc/pistar-release
+    else
+	sed -i "/ModemType =/c ModemType = ${ModemType}" /etc/pistar-release
+    fi
+    if ! grep -w 'ControllerType' /etc/pistar-release > /dev/null; then
+        sed -i "/ModemType /a ControllerType = ${ControllerType}" /etc/pistar-release
+    else
+        sed -i "/ControllerType =/c ControllerType = ${ControllerType}" /etc/pistar-release
+    fi
+fi
+
+# add / update WPSD version hash to /etc/pistar-release
+gitBranch=$(git --work-tree=/var/www/dashboard --git-dir=/var/www/dashboard/.git symbolic-ref --short HEAD)
+WPSDver=$( git --work-tree=/var/www/dashboard --git-dir=/var/www/dashboard/.git rev-parse --short=10 ${gitBranch} )
+if ! grep -w 'WPSD_Ver' /etc/pistar-release > /dev/null; then
+    sed -i "/Callsign =/a WPSD_Ver = ${WPSDver}" /etc/pistar-release
+else
+    sed -i "/WPSD_Ver/c WPSD_Ver = ${WPSDver}" /etc/pistar-release
+fi
+
+# cleanup legacy entries
+if [ $(grep -c 'MMDVMHost' /etc/pistar-release) -gt 2 ]; then
+    sed -i '/MMDVM/d' /etc/pistar-release
+    sed -i "/Version = /a MMDVMHost = " /etc/pistar-release
+fi
+if grep -q "OrangePiZero" /etc/pistar-release; then
+    sed -i 's/OrangePiZero/OrangePi/g' /etc/pistar-release 
+fi
+if grep -q "Hardware = RPi" /etc/pistar-release; then
+    sed -i 's/Hardware = RPi/Hardware = RaspberryPi/g' /etc/pistar-release 
+fi
+
+# cleanup last line..
+#sed -i '${/^$/d}' /etc/pistar-release
+php -q /usr/local/sbin/.wpsd-diags  > /dev/null 2>&1
+

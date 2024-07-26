@@ -1,0 +1,54 @@
+#!/bin/bash
+
+#
+# Nextion driver helper; if user selects Nexion driver for MMDVMHost, enable
+# the service. If Nextion is not defined/seleced, disable it.
+# 2/2023 - W0CHP
+# 
+
+if [ "$(id -u)" != "0" ]
+then
+    exit 1
+fi
+
+# Updated 2/23/2023 - W0CHP:
+# TGIFspots contain really weird hacks/scripts, etc.[1] for their Nextion
+# screens, and it all collides with WPSD and our native Nextion driver
+# support.  So lets ignore TGIFspots altogether.
+# [1] <https://github.com/EA7KDO/Scripts>
+if [ -f '/etc/cron.daily/getstripped' ] || [ -d '/usr/local/etc/Nextion_Support/' ] || [ -d '/Nextion' ] || grep -q 'SendUserDataMask=0b00011110' /etc/mmdvmhost ; then # these are hacks that seem to exist on TGIFspots.
+    exit 1 # bail - TGIFspot detected.
+fi
+
+# user has Nextion defined in mmdvmhost, so let's natively support it:
+if [ "`sed -nr "/^\[General\]/,/^\[/{ :l /^\s*[^#].*/ p; n; /^\[/ q; b l; }" /etc/mmdvmhost | grep "Display" | cut -d= -f 2`" = "Nextion" ]; then
+    # Check if the GroupsFileSrc and DMRidFileSrc exist in the INI file
+    if ! grep -q "^GroupsFileSrc=" /etc/mmdvmhost; then
+  	# Insert GroupsFileSrc in the NextionDriver section
+  	sed -i '/^\[NextionDriver\]$/a GroupsFileSrc=https://hostfiles.w0chp.net/groupsNextion.txt' /etc/mmdvmhost
+    fi
+    # Check if GroupsFile is set to groups.txt and change it to groupsNextion.txt
+    if grep -q "^GroupsFile=groups.txt" /etc/mmdvmhost; then
+	sed -i 's/^GroupsFile=groups.txt$/GroupsFile=groupsNextion.txt/' /etc/mmdvmhost
+    fi
+    systemctl stop nextiondriver.service > /dev/null 2<&1
+    /usr/bin/killall NextionDriver > /dev/null 2<&1
+    systemctl daemon-reload > /dev/null 2<&1
+    systemctl enable nextiondriver.service > /dev/null 2<&1
+else
+    if grep -qo 'Requires=nextiondriver.service' /lib/systemd/system/mmdvmhost.service ; then # if nextion is re'q, get rid of it
+        sed -i '/Requires=nextiondriver.service/d' /lib/systemd/system/mmdvmhost.service
+        systemctl daemon-reload > /dev/null 2<&1
+    fi
+    if grep -qo 'RequiredBy=mmdvmhost.service' /lib/systemd/system/nextiondriver.service ; then # if mmdvmhost is re'q, get rid of it
+        sed -i '/RequiredBy=mmdvmhost.service/d' /lib/systemd/system/nextiondriver.service
+        systemctl daemon-reload > /dev/null 2<&1
+    fi
+    # stop and disable
+    if ! systemctl status nextiondriver.service | grep 'disabled;' > /dev/null 2<&1 ; then
+        systemctl stop nextiondriver.service > /dev/null 2<&1
+        /usr/bin/killall NextionDriver > /dev/null 2<&1
+        systemctl disable nextiondriver.service > /dev/null 2<&1
+        systemctl daemon-reload > /dev/null 2<&1
+    fi
+fi

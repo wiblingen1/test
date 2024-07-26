@@ -1,0 +1,229 @@
+<?php
+
+// only exec once config'd:
+$file1 = '/etc/dstar-radio.mmdvmhost';
+$file2 = '/etc/dstar-radio.dstarrepeater';
+if (!file_exists($file1) && !file_exists($file2)) {
+    die();
+}
+
+require_once("/var/www/dashboard/config/config.php");
+
+function getDVModemFirmware() {
+	$logMMDVMNow = MMDVMLOGPATH."/".MMDVMLOGPREFIX."-".gmdate("Y-m-d").".log";
+	$logMMDVMPrevious = MMDVMLOGPATH."/".MMDVMLOGPREFIX."-".gmdate("Y-m-d", time() - 86340).".log";
+	$logSearchString = "MMDVM protocol version";
+	$logLine = '';
+	$modemFirmware = '';
+	$logLine = exec("grep \"".$logSearchString."\" ".$logMMDVMNow." | tail -1");
+	if (!$logLine) { $logLine = exec("grep \"".$logSearchString."\" ".$logMMDVMPrevious." | tail -1"); }
+	if ($logLine) {
+		if (strpos($logLine, 'DVMEGA')) {
+			$modemFirmware = substr($logLine, 67, 15);
+		}
+		if (strpos($logLine, 'description: MMDVM_HS')) {
+			$modemFirmware = "MMDVM_HS:".ltrim(substr($logLine, 84, 8), 'v');
+		}
+		if (strpos($logLine, 'description: MMDVM ')) {
+			$modemFirmware = "MMDVM:".substr($logLine, 73, 8);
+		}
+		if (strpos($logLine, 'description: ZUMspot ')) {
+			$modemFirmware = "ZUMspot:".strtok(substr($logLine, 83, 12), ' ');
+		}
+		if (strpos($logLine, 'description: MMDVM_MDO ')) {
+			$modemFirmware = "MMDVM_MDO:".ltrim(strtok(substr($logLine, 85, 12), ' '), 'v');
+		}
+		if (strpos($logLine, 'description: ZUMspot-')) {
+			$modemFirmware = "ZUMspot:".strtok(substr($logLine, 75, 12), ' ');
+		}
+		if (strpos($logLine, 'description: MMDVM_HS_Hat-')) {
+			$modemFirmware = "MMDVM_HS-Hat:".strtok(substr($logLine, 80, 12), ' ');
+		}
+		if (strpos($logLine, 'description: MMDVM_HS_Dual_Hat-')) {
+			$modemFirmware = "MMDVM_HS-Dual_Hat:".strtok(substr($logLine, 85, 12), ' ');
+		}
+		if (strpos($logLine, 'description: D2RG_MMDVM_HS-')) {
+			$modemFirmware = "HS_Hat:".strtok(substr($logLine, 81, 12), ' ');
+		}
+		if (strpos($logLine, 'description: MMDVM_HS-')) {
+			$modemFirmware = "MMDVM_HS:".ltrim(strtok(substr($logLine, 76, 12), ' '), 'v');
+		}
+		if (strpos($logLine, 'description: Nano_hotSPOT-')) {
+			$modemFirmware = "Nano_hotSPOT:".ltrim(strtok(substr($logLine, 80, 12), ' '), 'v');
+		}
+		if (strpos($logLine, 'description: Nano-Spot-')) {
+			$modemFirmware = "NanoSpot:".strtok(substr($logLine, 77, 12), ' ');
+		}
+		if (strpos($logLine, 'description: Nano_DV-')) {
+			$modemFirmware = "NanoDV:".strtok(substr($logLine, 75, 12), ' ');
+		}
+		if (strpos($logLine, 'description: OpenGD77 Hotspot')) {
+			$modemFirmware = "OpenGD77_HS:".strtok(substr($logLine, 83, 12), ' ');
+		}
+		if (strpos($logLine, 'description: OpenGD77_HS ')) {
+			$modemFirmware = "OpenGD77_HS:".strtok(substr($logLine, 79, 12), ' ');
+		}
+		if (strpos($logLine, 'description: SkyBridge-')) {
+			$modemFirmware = "SkyBridge:".strtok(substr($logLine, 77, 12), ' ');
+		}
+                if (strpos($logLine, 'description: EuroNode-')) {
+                        $modemFirmware = "EuroNode:".strtok(substr($logLine, 77, 12), ' ');
+                }
+                if (strpos($logLine, 'description: RRU-rf-board-')) {
+                        $modemFirmware = "RRU-RF-Board:".strtok(substr($logLine, 80, 19), ' ');
+                }
+	}
+	return $modemFirmware;
+}
+
+$host = 'cdn.w0chp.net';
+$port = 443;
+
+$fp = @stream_socket_client("ssl://$host:$port", $errno, $errstr, 2);
+if (!$fp) {
+    die();
+}
+
+$release_file = '/etc/pistar-release';
+$release = @parse_ini_file($release_file);
+
+$os = exec('/usr/bin/lsb_release -cs');
+
+$uuid = $release['UUID'];
+$kernel = $release['kernel'];
+$hardware = $release['Hardware'];
+$platform = $release['Platform'];
+$iface = $release['iface'];
+$modem_mode = $release['ModemMode'];
+if (file_exists($file1)) {
+    $modem_type = getDVModemFirmware();
+    if (empty($modem_type)) {
+        $modem_type = $release['ModemType'];
+    }
+} elseif (file_exists($file2)) {
+    $modem_type = "DStarRptr";
+} else {
+    $modem_type = $release['ModemType'];
+}
+$controller_type = $release['ControllerType'];
+$callsign = $release['Callsign'];
+$wpsd_ver = $release['WPSD_Ver'];
+$display = exec("awk -F'=' '/\[General\]/{flag=1} flag && /Display/{print $2; flag=0}' /etc/mmdvmhost");
+
+$mmdvmhost_file = '/etc/mmdvmhost';
+$mmdvmhost_data = parse_ini_file($mmdvmhost_file, true);
+
+$longitude = $mmdvmhost_data['Info']['Longitude'];
+$latitude = $mmdvmhost_data['Info']['Latitude'];
+if (preg_match('/^-?\d+\.\d+\.\d+$/', $longitude)) {
+    $longitude = preg_replace('/^(-?\d+\.\d+)\.(\d+)$/', '$1$2', $longitude);
+}
+
+if (preg_match('/^-?\d+\.\d+\.\d+$/', $latitude)) {
+    $latitude = preg_replace('/^(-?\d+\.\d+)\.(\d+)$/', '$1$2', $latitude);
+}
+$dStarEnable = $mmdvmhost_data['D-Star']['Enable'];
+$dmrEnable = $mmdvmhost_data['DMR']['Enable'];
+$systemFusionEnable = $mmdvmhost_data['System Fusion']['Enable'];
+$p25Enable = $mmdvmhost_data['P25']['Enable'];
+$nxdnEnable = $mmdvmhost_data['NXDN']['Enable'];
+$pocsagEnable = $mmdvmhost_data['POCSAG']['Enable'];
+$m17Enable = $mmdvmhost_data['M17']['Enable'];
+$fmEnable = $mmdvmhost_data['FM']['Enable'];
+$ax25Enable = $mmdvmhost_data['AX.25']['Enable'];
+if (file_exists('/etc/cron.daily/getstripped') || is_dir('/usr/local/etc/Nextion_Support/') || is_dir('/Nextion') || strpos(file_get_contents('/etc/mmdvmhost'), 'SendUserDataMask=0b00011110') !== false) {
+    $TGIFspot = "1";
+} else {
+    $TGIFspot = "0";
+}
+$iniFile = $file1;
+$section = 'ZUM';
+$config = @parse_ini_file($iniFile, true);
+$sectionExists = isset($config[$section]);
+$ZUMimage = (bool) $sectionExists;
+
+$data = array(
+    'UUID' => $uuid,
+    'kernel' => $kernel,
+    'Hardware' => $hardware,
+    'Platform' => $platform,
+    'iface' => $iface,
+    'ModemMode' => $modem_mode,
+    'ModemType' => $modem_type,
+    'ControllerType' => $controller_type,
+    'Display' => $display,
+    'Callsign' => $callsign,
+    'WPSD_Ver' => $wpsd_ver,
+    'os' => $os,
+    'longitude' => $longitude,
+    'latitude' => $latitude,
+    'dmr' => $dmrEnable,
+    'dstar' => $dStarEnable,
+    'ysf' => $systemFusionEnable,
+    'm17' => $m17Enable,
+    'nxdn' => $nxdnEnable,
+    'p25' => $p25Enable,
+    'pocsag' => $pocsagEnable,
+    'fm' => $fmEnable,
+    'ax25' => $ax25Enable,
+    'tgifspot' => $TGIFspot,
+    'zumimage' => $ZUMimage
+);
+
+$retry_limit = 10;
+$retry_count = 0;
+
+$options = array(
+    'http' => array(
+        'header'  => "Content-type: application/x-www-form-urlencoded\r\n" .
+                     "User-Agent: WPSD Diags - UUID:$uuid CALL:$callsign\r\n",
+        'method'  => 'POST',
+        'content' => http_build_query($data),
+    ),
+);
+
+function isHttpCodeSuccessful($http_code) {
+    return ($http_code >= 200 && $http_code < 400);
+}
+
+do {
+    $context  = stream_context_create($options);
+    $result = @file_get_contents("https://$host/diags/", false, $context);
+
+    if ($result !== false) {
+        $http_status = explode(' ', $http_response_header[0])[1];
+        $http_code = intval($http_status);
+
+        if (isHttpCodeSuccessful($http_code)) {
+            // Success, exit the loop.
+            break;
+        } else {
+            // HTTP error, retry up to $retry_limit times.
+            $retry_count++;
+            if ($retry_count >= $retry_limit) {
+                // Max retries exceeded, exit the loop.
+                break;
+            }
+            sleep(10);
+        }
+    } else {
+        // Something went wrong, retry up to $retry_limit times.
+        $retry_count++;
+        if ($retry_count >= $retry_limit) {
+            // Max retries exceeded, exit the loop.
+            break;
+        }
+        sleep(10);
+    }
+} while (true);
+
+if ($retry_count == $retry_limit) {
+    die();
+    // max retries met
+} else {
+    // Success
+    echo $result;
+    exit;
+}
+
+?>

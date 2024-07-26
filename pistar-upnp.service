@@ -1,0 +1,62 @@
+#!/bin/bash
+#########################################################
+#                                                       #
+#                 UPNP Service Handler                  #
+#                                                       #
+#########################################################
+
+# Service Config
+DAEMON=upnpc
+DAEMON_PATH=/usr/bin/
+PGREP=/usr/bin/pgrep
+KILL=/bin/kill
+SLEEP=/bin/sleep
+hostVar=$(hostname | cut -d'.' -f1)
+
+source /usr/local/sbin/.wpsd-common-funcs
+
+ipVar=$(interface_get_ip)
+
+# Pre-flight checks...
+test -x ${DAEMON_PATH}${DAEMON} || exit 1
+
+# Check that the network is UP and die if its not
+if [ "$(expr length ${ipVar}x)" == "1" ]; then
+    exit 0
+fi
+
+# Now we know the network is up - check for a valid IGD, die if there is none
+validIGD=$(upnpc -s | grep "valid IGD" | awk -F " : " '{print $2}' | head -n 1)
+if [ "$(expr length ${validIGD}x)" == "1" ]; then
+    # No valid IGD, nothing to do, bail
+    exit 0
+else
+    # Get the correct IGD URL
+    igdURL=$(upnpc -s | grep desc | grep "$(echo ${validIGD} | awk -F  "/" '{print $3}')" | awk '{print $2}')
+
+    case "$1" in
+	start) (
+	    source /etc/wpsd-upnp-rules
+	    for rule in "${START_RULES[@]}"; do
+		if [[ $rule != "#"* ]]; then
+ 		    eval "$rule"
+		fi
+	    done
+	)&
+	;;
+
+	stop) (
+	    source /etc/wpsd-upnp-rules
+	    for rule in "${STOP_RULES[@]}"; do
+                if [[ $rule != "#"* ]]; then
+                    eval "$rule"
+                fi
+	    done
+	)
+	;;
+
+	*)
+	    echo $"Usage: $0 {start|stop}"
+	    exit 1
+    esac
+fi

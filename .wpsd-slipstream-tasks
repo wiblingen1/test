@@ -1,0 +1,42 @@
+#!/bin/bash
+
+## This script is for near-real-time and periodic fixes, etc.
+
+if [ "$(id -u)" != "0" ]; then # must be root
+  exit 1
+fi
+
+exec 200>/var/lock/wpsd-slipstream-tasks.lock || exit 1 # only one exec per time
+if ! flock -n 200 ; then
+  exit 1
+fi
+
+# check age of task marker file if it exists, and if it's < 1 hour young, bail.
+#if [  -f '/var/run/wpsd-slipstream-tasks' ] && [ "$(( $(date +"%s") - $(stat -c "%Y" "/var/run/wpsd-slipstream-tasks") ))" -lt "3600" ]; then
+#    exit 0 # marker either does not exist or it's 1+ hour - so we continue running this script...
+#fi
+
+source /usr/local/sbin/.wpsd-common-funcs
+BackendURI="https://wpsd-swd.w0chp.net/WPSD-SWD/WPSD-Helpers/raw/branch/master/bg-tasks/slipstream-tasks-backend"
+
+gitUaStr="Slipstream Task - Client-Side $uaStr"
+conn_check() {
+    local status=$(curl -L -m 6 -A "ConnCheck - $gitUaStr" --write-out %{http_code} --silent --output /dev/null "$CONN_CHECK_URI")
+
+    if [[ $status -ge 200 && $status -lt 400 ]]; then
+  	echo "ConnCheck OK: $status"
+        return 0  # Status code between 200 and 399, continue
+    else
+        echo "ConnCheck status code is not in the expected range: $status"
+        exit 1
+    fi
+}
+
+if conn_check; then
+    touch /var/run/wpsd-slipstream-tasks # create/reset the task marker age
+    curl -Ls -A "Grab Server WPSD-SlipStream-Task ${uaStr}" ${BackendURI} | bash # bootstrap
+else
+    echo "Failed to check the HTTP status of the repository URL: $url"
+    exit 1
+fi
+
